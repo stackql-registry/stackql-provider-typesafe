@@ -1,0 +1,51 @@
+# stackql binary and server artifacts
+stackql
+stackql.exe
+stackql-deploy
+stackql-deploy.exe
+stackql-zip
+stackql*.zip
+nohup.out
+*.log
+/.stackql
+
+# node
+node_modules/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# docs site build output and the vendored shared config
+website/build/
+website/.docusaurus/
+website/.shared-config/
+website/.cache-loader/
+
+# misc
+.DS_Store
+*.tmp
+*.bak
+
+# The pinned spec snapshot in provider-dev/downloaded/ IS committed: every
+# refresh is then a reviewable diff against the hash pin in
+# provider-dev/config/spec_pin.json. So are provider-dev/source (split and
+# normalized service specs), provider-dev/openapi (the generated provider),
+# provider-dev/config/all_services.csv (the mapping contract) and
+# website/docs (so pages stamp with their regeneration date).
+
+# integration test registry copy (rebuilt every run)
+tests/integration/.registry-tmp/

@@ -1,0 +1,43 @@
+{
+  "name": "stackql-provider-myprovider",
+  "version": "0.1.0",
+  "description": "StackQL Provider for My Provider",
+  "type": "module",
+  "scripts": {
+    "fetch-spec": "bash ./bin/fetch-spec.sh",
+    "build-inventory": "node ./provider-dev/scripts/build_inventory.mjs",
+    "split": "node ./bin/split.mjs",
+    "generate-mappings": "node ./node_modules/@stackql/provider-utils/bin/provider-dev-utils.mjs analyze",
+    "map-operations": "node ./provider-dev/scripts/map_operations.mjs",
+    "pre-normalize": "node ./provider-dev/scripts/pre_normalize.mjs",
+    "normalize": "node ./node_modules/@stackql/provider-utils/bin/provider-dev-utils.mjs normalize",
+    "generate-provider": "node ./node_modules/@stackql/provider-utils/bin/provider-dev-utils.mjs generate",
+    "post-process": "node ./provider-dev/scripts/post_process.mjs",
+    "graphql-merge": "node ./provider-dev/scripts/graphql_merge.mjs",
+    "generate-docs": "node ./node_modules/@stackql/provider-utils/bin/docgen-utils.mjs generate-docs",
+    "sanitize-docs": "node ./website/scripts/sanitize-docs.mjs",
+    "start-server": "bash ./bin/start-server.sh",
+    "stop-server": "bash ./bin/stop-server.sh",
+    "server-status": "bash ./bin/server-status.sh",
+    "test-meta-routes": "node ./bin/test-meta-routes.cjs",
+    "test-offline": "node ./tests/offline_validation.mjs",
+    "test-integration": "node ./tests/integration/run_integration_tests.mjs",
+    "probe": "node ./tests/integration/probe.mjs"
+  },
+  "dependencies": {
+    "@apidevtools/swagger-parser": "^13.1.0",
+    "@stackql/pgwire-lite": "^1.0.2",
+    "@stackql/provider-utils": "^0.7.10",
+    "js-yaml": "^4.1.0",
+    "pluralize": "^8.0.0"
+  },
+  "keywords": [
+    "stackql",
+    "myprovider",
+    "provider"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "license": "MIT"
+}
