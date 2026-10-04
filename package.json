@@ -1,9 +1,10 @@
 {
-  "name": "stackql-provider-myprovider",
+  "name": "stackql-provider-typesafe",
   "version": "0.1.0",
-  "description": "StackQL Provider for My Provider",
+  "description": "StackQL provider for TypeSafe AI (Jev): the System One evaluation endpoint and the models catalog as SQL",
   "type": "module",
   "scripts": {
+    "postinstall": "node ./bin/patch-provider-utils.mjs",
     "fetch-spec": "bash ./bin/fetch-spec.sh",
     "build-inventory": "node ./provider-dev/scripts/build_inventory.mjs",
     "split": "node ./bin/split.mjs",
@@ -33,7 +34,7 @@
   },
   "keywords": [
     "stackql",
-    "myprovider",
+    "typesafe",
     "provider"
   ],
   "engines": {

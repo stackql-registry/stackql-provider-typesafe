@@ -56,7 +56,9 @@ try {
 // Deterministic fix classes. Each walks the document, rewrites in place and
 // returns a count. The defaults cover the JSON Schema 2019-09/2020-12 and
 // OpenAPI 3.1 leaks that swagger-parser (3.0 validation) and stackql's
-// kin-openapi loader reject. TODO(template): append vendor-specific classes.
+// kin-openapi loader reject. The TypeSafe document needs two of them
+// (type_null_to_nullable, const_to_enum - NOTES.md finding 1); append a
+// vendor-specific class if a refresh introduces a new construct.
 // ---------------------------------------------------------------------------
 
 const SCALAR_PREFERENCE = ['string', 'integer', 'number', 'boolean', 'object', 'array'];
@@ -112,8 +114,8 @@ const FIX_CLASSES = [
     name: 'openapi_3_1_2_to_3_1_1',
     apply: (doc) => { if (doc.openapi === '3.1.2') { doc.openapi = '3.1.1'; return 1; } return 0; }
   }
-  // TODO(template): vendor-specific classes, e.g. a required list naming an
-  // absent property, a response declared twice under one code, ...
+  // typesafe: no vendor-specific classes needed (swagger-parser validates the
+  // document after the generic lowering).
 ];
 
 const fixCounts = {};
@@ -142,7 +144,8 @@ console.log(`Spec: ${spec.info?.title} - openapi ${spec.openapi || spec.swagger}
 // ---------------------------------------------------------------------------
 // Deterministic redaction of credential-shaped example values (they trip
 // GitHub push protection on every artifact that embeds them).
-// TODO(template): add vendor-specific patterns seen in the snapshot.
+// typesafe: the snapshot carries no credential-shaped examples (the pin
+// records zero redactions); the generic patterns stay as a guard.
 // ---------------------------------------------------------------------------
 
 const REDACTIONS = [

@@ -1,40 +1,38 @@
 #!/usr/bin/env python3
-"""pystackql smoke test for the myprovider stackql provider.
+"""pystackql smoke test for the typesafe stackql provider.
 
-Exercises the salient resources against a real dev account: read smokes
-across the surface, then cheap self-cleaning write lifecycles (INSERT /
-SELECT / UPDATE / DELETE of a secret, key or small object), a config
-toggle-and-restore (which doubles as the UPDATE string-coercion probe), the
-flagship round trip, and - only behind --with-gated-lifecycle - the expensive
-create/delete lifecycle. Design it from the vendor's Terraform provider
-examples (the resources and mutations people actually use) with a budget
-under $5 (aim under $1).
+Exercises the whole surface against a real TypeSafe account: the models
+catalog (the control plane - a free read) and the System One evaluation
+endpoint (the inference plane - billed per input token), the way the docs
+examples use them: a yes/no (noul) question, a choice, a score, the three
+mixed in one request, a structured JSON state, an alias resolved to a
+versioned model id and that id pinned on a second call. There are no
+mutable resources in the API, so there is nothing to create, toggle or
+sweep, and no gated lifecycle.
 
-Everything created is named `stackql-smoke-<stamp>`; before running, the
-script sweeps every stackql-smoke-* breadcrumb so each run starts clean and a
-failed run cannot leave billable objects behind past the next run. Anything
-toggled is restored.
+Budget: Jev is billed at $0.042 per million input tokens (output tokens are
+free, docs.typesafe.ai/models, 2026-10-02). The default run makes nine
+evaluations of a few hundred tokens each (measured 2026-10-05: 2485 input
+tokens, about $0.0001) and prints the measured token total and its cost
+from the `usage` column at the end. `--read-only` runs the catalog read only
+and spends nothing.
 
 Credentials come from the environment, exactly as the provider reads them
 (`make smoke*` sources .env):
 
-    export MYPROVIDER_API_TOKEN=...
-    export MYPROVIDER_ORG_ID=...        # the scoping server variable, if any
+    export TYPESAFE_API_KEY=...
 
-Rate limiting: every statement is paced by INTER_REQUEST_DELAY_S; a 429 is a
-harness bug and fails the run.
+Rate limiting: Jev 1.13 allows 80 requests per second and 100K tokens per
+second, adjusted dynamically while the service is in early access. Every
+statement is paced by INTER_REQUEST_DELAY_S; a 429 is a harness bug and
+fails the run (the provider's own retry policy would otherwise mask it).
 
 Never run this against a production account.
 
 Usage:
-    python tests/smoke_test.py                          # local provider-dev/openapi registry (default)
-    python tests/smoke_test.py --live                   # the published provider in the stackql registry
-    python tests/smoke_test.py --read-only              # read smokes only, no writes
-    python tests/smoke_test.py --with-gated-lifecycle   # also the expensive lifecycle
-    python tests/smoke_test.py --cleanup-only           # just sweep breadcrumbs
-
-TODO(template): fill in REQUIRED_ENV, the sweep, the read smokes, the write
-lifecycles and the gated lifecycle. The run FAILS while no step is defined.
+    python tests/smoke_test.py                 # local provider-dev/openapi registry (default)
+    python tests/smoke_test.py --live          # the published provider in the stackql registry
+    python tests/smoke_test.py --read-only     # the models catalog only, no evaluation is billed
 """
 
 from __future__ import annotations
@@ -48,34 +46,83 @@ import time
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-PROVIDER = "myprovider"
-SMOKE_PREFIX = "stackql-smoke-"
-# TODO(template): pace under the vendor's documented limit with margin
-INTER_REQUEST_DELAY_S = 1.2
-# TODO(template): the credential and scoping variables the provider reads
-REQUIRED_ENV = ("MYPROVIDER_API_TOKEN",)
+PROVIDER = "typesafe"
+# 80 requests per second is the documented limit; one statement per second
+# keeps the suite two orders of magnitude under it.
+INTER_REQUEST_DELAY_S = 1.0
+REQUIRED_ENV = ("TYPESAFE_API_KEY",)
 # pystackql manages its own stackql binary; the harness upgrades it when
-# older than the minimum the provider needs (x-stackQL-envVar server
-# variables need >= 0.10.601).
-MIN_STACKQL_VERSION = (0, 10, 601)
+# older than the minimum the provider needs (the provider-level retry policy
+# is read by any-sdk >= 0.6.0, shipped in stackql v0.12.x).
+MIN_STACKQL_VERSION = (0, 12, 700)
+# docs.typesafe.ai/models, 2026-10-02: $0.042 per million input tokens
+USD_PER_INPUT_TOKEN = 0.042 / 1_000_000
 
 ERROR_RE = re.compile(
     r"http response status code: [45]|over HTTP error|error assembling|"
     r"cannot find matching operation|FindRoute|no matching operation|"
     r"cannot find any viable servers|parser error|panic|"
-    r"no request body for operation|schema unsuitable|UNAUTHORIZED|FORBIDDEN",
+    r"no request body for operation|schema unsuitable|UNAUTHORIZED|FORBIDDEN|"
+    r"authentication_error",
     re.I,
 )
-RATE_LIMIT_RE = re.compile(r"status code: 429|TOO_MANY_REQUESTS|rate limit", re.I)
+RATE_LIMIT_RE = re.compile(r"status code: 429|TOO_MANY_REQUESTS|rate_limit_error", re.I)
+
+# The statements the docs lead with. `questions` is a JSON object passed as
+# a string: naive body translation sends it as the JSON it encodes.
+STATE_TICKET = "Hi, I've been trying to connect my Stripe account for 3 days and the integration keeps failing. I'm losing sales. Please help ASAP."
+Q_NOUL = {"is_urgent": {"type": "noul", "instructions": "Does this message express urgency?"}}
+Q_CHOICE = {
+    "department": {
+        "type": "choice",
+        "instructions": "Which team should handle this?",
+        "criteria": {
+            "billing": "Payments, invoicing, refunds",
+            "technical": "Bugs, outages, integrations",
+            "sales": "Pricing, upgrades, new accounts",
+        },
+    }
+}
+Q_SCORE = {
+    "frustration": {
+        "type": "score",
+        "instructions": "How frustrated is the customer?",
+        "criteria": ["Calm", "Frustrated", "Very angry"],
+    }
+}
+STATE_STRUCTURED = {
+    "ticket": {
+        "subject": "Duplicate charge",
+        "messages": [
+            {"from": "customer", "text": "I was charged twice for order A-104. Please refund the duplicate."},
+            {"from": "support", "text": "We are checking the charges."},
+        ],
+    },
+    "order": {"id": "A-104", "charges": [{"amount_usd": 49, "status": "captured"}, {"amount_usd": 49, "status": "captured"}]},
+    "refund_policy": "Duplicate charges are eligible for a refund.",
+}
+Q_STRUCTURED = {
+    "refund_requested": {"type": "noul", "instructions": "Did the customer ask for a refund?"},
+    "policy_supports_refund": {
+        "type": "noul",
+        "instructions": "Does `refund_policy` entitle the customer to a refund of one of the charges in `order`?",
+    },
+}
+
+
+def sql_str(value) -> str:
+    """Render a Python value as a single-quoted SQL string literal (JSON for non-strings)."""
+    text = value if isinstance(value, str) else json.dumps(value, separators=(",", ":"))
+    return "'" + text.replace("'", "''") + "'"
 
 
 class Smoke:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
-        self.stamp = str(int(time.time()))[-6:]
-        self.name = f"{SMOKE_PREFIX}{self.stamp}"
         self.results: list[tuple[str, str, str]] = []
         self.requests = 0
+        self.input_tokens = 0
+        self.output_tokens = 0
 
         for var in REQUIRED_ENV:
             if not os.environ.get(var):
@@ -128,10 +175,7 @@ class Smoke:
             time.sleep(INTER_REQUEST_DELAY_S)
         self.requests += 1
         try:
-            if sql.lstrip().upper().startswith(("SELECT", "SHOW", "DESCRIBE")) or "RETURNING" in sql.upper():
-                out = self.sq.execute(sql)
-            else:
-                out = self.sq.executeStmt(sql)
+            out = self.sq.execute(sql)
         except Exception as exc:  # noqa: BLE001
             return [], str(exc)
         text = json.dumps(out, default=str)
@@ -162,64 +206,99 @@ class Smoke:
         print(f"  PASS  {name}")
         return rows
 
-    def wait_for(self, name: str, sql: str, pred, timeout: int = 600, interval: int = 10):
-        """Poll until pred(rows) holds - for async lifecycles (any-sdk has no LRO polling)."""
-        start = time.time()
-        last = None
-        while time.time() - start < timeout:
-            rows, err = self.q(sql)
-            last = err or json.dumps(rows, default=str)[:160]
-            if not err and pred(rows):
-                self.results.append((name, "PASS", f"{int(time.time() - start)}s"))
-                print(f"  PASS  {name}  ({int(time.time() - start)}s)")
-                return True
-            time.sleep(interval)
-        self.results.append((name, "FAIL", f"timeout: {last}"))
-        print(f"  FAIL  {name}  [timeout: {last}]")
-        return False
+    def evaluate(self, name: str, state, questions, model: str = "jev-latest", contains: str | None = None):
+        """One System One evaluation; accumulates the usage the row reports."""
+        sql = (
+            f"SELECT model, answers, usage FROM {PROVIDER}.systemone.evaluations "
+            f"WHERE state = {sql_str(state)} AND model = {sql_str(model)} AND questions = {sql_str(questions)}"
+        )
+        rows = self.step(name, sql, expect_rows=True, contains=contains)
+        if rows:
+            usage = rows[0].get("usage")
+            if isinstance(usage, str):
+                try:
+                    usage = json.loads(usage)
+                except ValueError:
+                    usage = {}
+            if isinstance(usage, dict):
+                self.input_tokens += int(usage.get("input_tokens") or 0)
+                self.output_tokens += int(usage.get("output_tokens") or 0)
+        return rows
 
-    # ------------------------------------------------------- breadcrumb sweep
-    def cleanup_breadcrumbs(self) -> None:
-        print("== breadcrumb sweep ==")
-        # TODO(template): list every resource the write lifecycles create and
-        # delete the stackql-smoke-* ones, most expensive first, e.g.
-        # rows, err = self.q(f"SELECT id, name FROM {PROVIDER}.keys.keys")
-        # if err:
-        #     print(f"  WARN key sweep list failed: {err[:120]}")
-        # else:
-        #     for r in rows:
-        #         if str(r.get("name", "")).startswith(SMOKE_PREFIX):
-        #             print(f"  sweeping key {r['name']}")
-        #             self.q(f"DELETE FROM {PROVIDER}.keys.keys WHERE key_id = '{r['id']}'")
-        print("  (no sweep defined)")
+    @staticmethod
+    def answers_of(rows) -> dict:
+        answers = rows[0].get("answers") if rows else None
+        if isinstance(answers, str):
+            try:
+                answers = json.loads(answers)
+            except ValueError:
+                answers = {}
+        return answers if isinstance(answers, dict) else {}
+
+    def assert_true(self, name: str, cond: bool, note: str = "") -> None:
+        self.results.append((name, "PASS" if cond else "FAIL", "" if cond else note))
+        print(f"  {'PASS' if cond else 'FAIL'}  {name}{'' if cond else '  [' + note[:140] + ']'}")
 
     # -------------------------------------------------------------- read path
     def read_smokes(self) -> None:
-        print("== read smokes ==")
-        self.step("show services", f"SHOW SERVICES IN {PROVIDER}", expect_rows=True)
-        # TODO(template): the estate inventory, the posture set, the flagship
-        # read, one read per service - the queries the docs lead with.
-        # self.step("estate inventory", f"SELECT id, name, state, region FROM {PROVIDER}.services.services")
+        print("== read smokes (free) ==")
+        self.step("show services", f"SHOW SERVICES IN {PROVIDER}", expect_rows=True, contains="systemone")
+        rows = self.step("models catalog", f"SELECT name, description, release_date FROM {PROVIDER}.models.models ORDER BY name",
+                         expect_rows=True, contains="jev-latest")
+        if rows:
+            print("        " + ", ".join(f"{r.get('name')} ({r.get('release_date')})" for r in rows))
 
-    # ------------------------------------------------------------- write path
-    def write_lifecycles(self) -> None:
-        name = self.name
-        print(f"== write lifecycles ({name}) ==")
-        # TODO(template): cheap, self-cleaning: INSERT -> SELECT -> UPDATE ->
-        # SELECT -> DELETE -> SELECT (gone) of a secret / key / small object;
-        # a config toggle-and-restore (UPDATE sends every value as a string -
-        # this is the coercion probe); the flagship round trip; every EXEC the
-        # docs show. Use try/finally so the DELETE always runs.
-        # self.step("key INSERT", f"INSERT INTO {PROVIDER}.keys.keys (name) SELECT '{name}'")
-        # ...
-        # self.step("key DELETE", f"DELETE FROM {PROVIDER}.keys.keys WHERE key_id = '{kid}'")
+    # -------------------------------------------------------- inference path
+    def evaluation_smokes(self) -> None:
+        print("== System One evaluations (billed per input token) ==")
+        rows = self.evaluate("noul: is the ticket urgent", STATE_TICKET, Q_NOUL, contains="noul")
+        resolved = rows[0].get("model") if rows else None
+        if rows:
+            print(f"        {resolved}: {json.dumps(self.answers_of(rows))[:120]}")
+            p = self.answers_of(rows).get("is_urgent", {}).get("noul")
+            self.assert_true("noul answer is a probability in [0, 1]", isinstance(p, (int, float)) and 0 <= p <= 1, json.dumps(rows[0].get("answers"))[:140])
+            self.assert_true("jev-latest resolves to a versioned model id", isinstance(resolved, str) and resolved.startswith("jev-") and resolved != "jev-latest", str(resolved))
 
-    def gated_lifecycle(self) -> None:
-        name = self.name
-        print(f"== gated lifecycle ({name}) - billable, keep the window short ==")
-        # TODO(template): the expensive create / wait / stop / delete, always
-        # inside try/finally, polling with wait_for. Delete the method and the
-        # Makefile target if the provider has no such lifecycle.
+        rows = self.evaluate("choice: which team", STATE_TICKET, Q_CHOICE, contains="choice")
+        if rows:
+            a = self.answers_of(rows).get("department", {})
+            self.assert_true("choice answer names one of the criteria with probabilities and confidence",
+                             a.get("choice") in Q_CHOICE["department"]["criteria"] and isinstance(a.get("probabilities"), dict) and "confidence" in a,
+                             json.dumps(a)[:140])
+
+        rows = self.evaluate("score: how frustrated", STATE_TICKET, Q_SCORE, contains="score")
+        if rows:
+            a = self.answers_of(rows).get("frustration", {})
+            self.assert_true("score answer carries score, legend and probabilities",
+                             isinstance(a.get("score"), (int, float)) and isinstance(a.get("legend"), dict) and isinstance(a.get("probabilities"), dict),
+                             json.dumps(a)[:140])
+
+        mixed = {**Q_NOUL, **Q_CHOICE, **Q_SCORE}
+        rows = self.evaluate("mixed: three question types in one request", STATE_TICKET, mixed)
+        if rows:
+            self.assert_true("mixed request returns one answer per question", set(self.answers_of(rows)) == set(mixed), json.dumps(rows[0].get("answers"))[:140])
+
+        rows = self.evaluate("structured state: ticket + order + policy as a JSON object", STATE_STRUCTURED, Q_STRUCTURED)
+        if rows:
+            self.assert_true("structured state answered both questions", set(self.answers_of(rows)) == set(Q_STRUCTURED), json.dumps(rows[0].get("answers"))[:140])
+
+        if resolved:
+            rows = self.evaluate(f"pinned model id {resolved}", STATE_TICKET, Q_NOUL, model=resolved)
+            if rows:
+                self.assert_true("pinned model id is echoed back", rows[0].get("model") == resolved, str(rows[0].get("model")))
+
+        # json_extract over the JSON columns - the docs' routing idiom
+        sql = (
+            f"SELECT json_extract(answers, '$.is_urgent.noul') AS p_urgent, "
+            f"json_extract(usage, '$.input_tokens') AS input_tokens "
+            f"FROM {PROVIDER}.systemone.evaluations "
+            f"WHERE state = {sql_str(STATE_TICKET)} AND model = 'jev-latest' AND questions = {sql_str(Q_NOUL)}"
+        )
+        rows = self.step("json_extract over answers and usage", sql, expect_rows=True)
+        if rows:
+            self.assert_true("json_extract yields the probability and the token count",
+                             rows[0].get("p_urgent") not in (None, "") and str(rows[0].get("input_tokens")).isdigit(), json.dumps(rows[0])[:140])
+            self.input_tokens += int(rows[0].get("input_tokens") or 0)
 
     # ---------------------------------------------------------------- summary
     def summary(self) -> int:
@@ -232,9 +311,9 @@ class Smoke:
         registry = "public" if self.args.live else "local"
         print(f"  {counts['PASS']} passed, {counts['FAIL']} failed; {self.requests} statements, "
               f"paced at {INTER_REQUEST_DELAY_S}s (registry: {registry})")
-        if len(self.results) <= 1:
-            print("  FAIL  the smoke suite defines no provider-specific steps yet (TODO)")
-            return 1
+        if self.input_tokens:
+            print(f"  usage: {self.input_tokens} input tokens (about ${self.input_tokens * USD_PER_INPUT_TOKEN:.6f} at $0.042/Mtok), "
+                  f"{self.output_tokens} output tokens (free)")
         return 1 if counts["FAIL"] else 0
 
 
@@ -242,22 +321,14 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=f"{PROVIDER} provider smoke test")
     ap.add_argument("--live", action="store_true",
                     help="run against the published provider in the stackql registry (default: the local provider-dev/openapi file registry)")
-    ap.add_argument("--cleanup-only", action="store_true", help="sweep stackql-smoke-* breadcrumbs and exit")
-    ap.add_argument("--read-only", action="store_true", help="read smokes only")
-    ap.add_argument("--with-gated-lifecycle", action="store_true",
-                    help="also run the expensive create/delete lifecycle (off by default)")
+    ap.add_argument("--read-only", action="store_true", help="the models catalog only - no evaluation is billed")
     args = ap.parse_args()
 
     smoke = Smoke(args)
-    print(f"{PROVIDER} smoke test  registry={'public' if args.live else 'local'}  name={smoke.name}  stackql={smoke.sq.version}")
-    smoke.cleanup_breadcrumbs()
-    if args.cleanup_only:
-        return 0
+    print(f"{PROVIDER} smoke test  registry={'public' if args.live else 'local'}  stackql={smoke.sq.version}")
     smoke.read_smokes()
     if not args.read_only:
-        smoke.write_lifecycles()
-        if args.with_gated_lifecycle:
-            smoke.gated_lifecycle()
+        smoke.evaluation_smokes()
     return smoke.summary()
 
 

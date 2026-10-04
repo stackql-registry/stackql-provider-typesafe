@@ -1,20 +1,27 @@
-# StackQL provider template
+# StackQL provider for TypeSafe AI
 
-A template repository for building a [StackQL](https://github.com/stackql/stackql) provider to the current standard: a deterministic `make` pipeline from a pinned upstream spec to a generated provider, every any-sdk primitive available where the API warrants it (snake_case surface, request and response transforms, pagination, query-parameter pushdown, `x-stackQL-envVar` scoping, `objectKey`, lifecycle `EXEC` methods, GraphQL merge, provider views), three credential-free test layers, a budgeted live smoke suite, a Docusaurus microsite and CI.
+A [StackQL](https://github.com/stackql/stackql) provider for the TypeSafe AI API (`https://api.typesafe.ai`), the hosted service behind Jev, TypeSafe's flagship System One model. Two services, two resources, both reads:
 
-The procedure is the bundled Claude Code skill, [`.claude/skills/stackql-provider-development`](.claude/skills/stackql-provider-development/SKILL.md). The repository is laid out so a Claude Code session (or a person) can complete it for a given provider by working the skill's steps in order; every decision left open is marked `TODO(template)`. The skill also uplifts an existing provider repository - copy the `.claude/skills` directory there and start from its `references/uplift-checklist.md`.
+| Service | Resource | Method | Verb | Operation |
+|---|---|---|---|---|
+| `models` | `models` | `list` | `SELECT` | `GET /v1/models` - the models and aliases the API key can use (`objectKey: $.models`) |
+| `systemone` | `evaluations` | `evaluate` | `SELECT` | `POST /v1/systemone` - evaluate a `state` against named Noul / Choice / Score questions |
 
-The rest of this file is the shape of the finished provider README (numbered build guide, steps 0-8, with counts that match the committed artifacts). Replace the sections as the build settles them.
+The evaluation endpoint is bound as `SELECT` (the anthropic `messages.create` precedent): the required body fields `state`, `model` and `questions` are the WHERE keys, and the row carries `model` (the versioned id that answered), `answers` (a JSON map keyed by your question names) and `usage` (token counts). TypeSafe publishes no admin or usage API; keys are managed in the console and usage is reported per request (see [NOTES.md](NOTES.md) finding 2).
 
-## Using the template
+The provider's primary use is the agent routine over the [StackQL MCP server](https://stackql.io/docs/command-line-usage/mcp): rows from another provider become the `state`, Jev returns a typed decision, and a StackQL mutation or lifecycle operation runs only when the decision clears the routine's threshold. The getting-started page carries that loop for tagging hygiene (aws), rightsizing (aws), incident triage (k8s), access review (okta), public ingress review (aws) and audit findings (okta and github); every statement on it is validated by `bin/validate-docs-examples.sh` (NOTES.md findings 12 and 13).
 
-1. Create the repository from this template (GitHub "Use this template", or clone and re-init) and run `npm install`.
-2. Rewrite the placeholders: `bin/init-provider.sh <name> "<Title>" [https://api.vendor.com]` replaces `myprovider`, `My Provider`, `MYPROVIDER` and `api.example.com` across the files that carry them (`grep -rn myprovider .` afterwards should find nothing outside `.claude/`).
-3. Fill the constants in `provider-dev/scripts/lib/spec_helpers.mjs` (`SPEC_URL`, `SPEC_FILE`, `PATH_VERSION_PREFIX`, `SCOPE_PREFIX` / `ROOT_PATHS` for a scoped API, `WIRE_CASING`) and `provider-dev/config/` (`servers.json`, `provider_config.json`, `service_names.json`).
-4. Open a Claude Code session in the repository and ask it to build the provider - it picks up `CLAUDE.md` and the skill. Or work the skill's steps by hand: `make fetch-spec`, `make inventory`, add service rules, `make split`, `make mappings-report` / `make mappings`, and so on to `make all`.
-5. `grep -rn "TODO(template)" --exclude-dir=node_modules .` lists what is still open.
+```sql
+SELECT model,
+       json_extract(answers, '$.is_urgent.noul') AS p_urgent,
+       json_extract(usage, '$.input_tokens') AS input_tokens
+FROM typesafe.systemone.evaluations
+WHERE state = 'Hi, I have been trying to connect my Stripe account for 3 days and the integration keeps failing. Please help ASAP.'
+  AND model = 'jev-latest'
+  AND questions = '{"is_urgent": {"type": "noul", "instructions": "Does this message express urgency?"}}';
+```
 
-What the template is not: a publisher. Publishing to the public registry is a separate, human-in-the-loop step (section 7).
+The procedure that built this repository is the bundled Claude Code skill, [`.claude/skills/stackql-provider-development`](.claude/skills/stackql-provider-development/SKILL.md); the settled decisions are in [CLAUDE.md](CLAUDE.md) and the evidence in [NOTES.md](NOTES.md).
 
 ## What is StackQL
 
@@ -23,9 +30,9 @@ What the template is not: a publisher. Publishing to the public registry is a se
 ## Prerequisites
 
 - Node.js >= 22.19
-- A `stackql` binary (`$STACKQL`, `./stackql`, or on `PATH`; `bin/start-server.sh` downloads one if none is found)
+- A `stackql` binary (`$STACKQL`, `./stackql`, or on `PATH`; `bin/start-server.sh` downloads one if none is found); the engine facts in NOTES.md were verified against v0.12.732
 - GNU make and bash (Linux, macOS or WSL); Python 3 for the smoke suite; yarn for the website
-- For live smoke tests: a dedicated dev account for the provider (never a production account) and its credentials in `.env` (see `.env.example`)
+- For live smoke tests: a TypeSafe API key for a dedicated dev account (never a production account) in `.env` (see `.env.example`)
 
 ## Makefile
 
@@ -40,7 +47,7 @@ make test     # the three credential-free test layers
 make smoke    # live smoke suite against the dev account (sources .env if present)
 ```
 
-`make all` never touches a real account. The live suites are `smoke`, `smoke-live` (the published provider, post-publish verification), `smoke-read-only`, `smoke-gated-lifecycle` (the expensive create/delete, gated) and `smoke-cleanup` (sweep `stackql-smoke-*` breadcrumbs).
+`make all` never touches a real account. The live suites are `smoke` (the catalog plus nine billed evaluations; measured at about $0.0001 per run), `smoke-live` (the published provider, post-publish verification) and `smoke-read-only` (the catalog only, spends nothing). The API has no mutable resources, so there is no gated lifecycle and nothing to sweep.
 
 ## 0. Download and pin the spec
 
@@ -49,9 +56,9 @@ make fetch-spec      # verify against the recorded pin (fails on drift)
 make refresh-spec    # accept an upstream change (rewrites the pin - review the diff)
 ```
 
-`bin/fetch-spec.sh` downloads the spec to a temp dir; `provider-dev/scripts/record_spec_pin.mjs` applies the deterministic fix classes (counted in the pin), validates with `@apidevtools/swagger-parser`, redacts credential-shaped example values, verifies the upstream sha256 against `provider-dev/config/spec_pin.json` and only then writes the snapshot into `provider-dev/downloaded/` (committed, so every refresh is a reviewable diff). Before accepting a refresh: `node .claude/skills/stackql-provider-development/scripts/spec_diff.mjs <pinned> <fetched>` and record the summary in `NOTES.md`.
+`bin/fetch-spec.sh` downloads `https://api.typesafe.ai/openapi.json` to a temp dir; `provider-dev/scripts/record_spec_pin.mjs` applies the deterministic fix classes (counted in the pin), validates with `@apidevtools/swagger-parser`, redacts credential-shaped example values, verifies the upstream sha256 against `provider-dev/config/spec_pin.json` and only then writes the snapshot into `provider-dev/downloaded/typesafe-v1.json` (committed, so every refresh is a reviewable diff). Before accepting a refresh: `node .claude/skills/stackql-provider-development/scripts/spec_diff.mjs <pinned> <fetched>` and record the summary in `NOTES.md`.
 
-TODO(template): the pinned snapshot's title, OpenAPI version, path and operation counts, fetch date and the fix classes applied.
+Pinned snapshot: title TypeSafe, OpenAPI 3.1.0, stated version 0.2.0, 2 paths, 2 operations, 14158 bytes, fetched 2026-10-02, upstream sha256 `a191f8a7df6b...`. Fix classes applied: `type_null_to_nullable` 7, `const_to_enum` 6; no redactions.
 
 ## 1. Endpoint inventory and service split
 
@@ -61,15 +68,20 @@ make inventory
 
 Writes `provider-dev/config/endpoint_inventory.csv`: one row per operation with scope, path params, pagination-looking query params, request body presence / media types / bare-array flag, the update-semantics presumption, vendor labels, response shape and envelope candidates, the proposed service / resource / method / verb / objectKey and a skip reason code.
 
-The service split is the ordered path rules in `provider-dev/config/service_names.json` (first match wins; an unmatched path fails the build; `"excluded": true` classifies a service whose every operation is skip-coded without emitting it). Then:
+The service split is the ordered path rules in `provider-dev/config/service_names.json` (first match wins; an unmatched path fails the build). Then:
 
 ```bash
 make split
 ```
 
-writes `provider-dev/source/<service>.yaml` (committed build artifacts), rebased onto the scoped server template in `provider-dev/config/servers.json` when `SCOPE_PREFIX` is set.
+writes `provider-dev/source/<service>.yaml` (committed build artifacts) with the fixed server `https://api.typesafe.ai` (no scoping prefix).
 
-TODO(template): the inventory counts (operations, mapped, skipped by reason code, labelled) and the service table (service -> resources).
+Inventory: 2 operations, 2 mapped, 0 skipped, 0 labelled, no pagination parameters, no path or query parameters. Services:
+
+| Service | Resources | Operations |
+|---|---|---|
+| `models` | `models` | `GET /v1/models` |
+| `systemone` | `evaluations` | `POST /v1/systemone` |
 
 ## 2. Mappings
 
@@ -78,20 +90,9 @@ make mappings-report   # print every derived mapping without writing
 make mappings          # regenerate all_services.csv from scratch and apply the rules
 ```
 
-`provider-dev/scripts/map_operations.mjs` fills `stackql_resource_name`, `stackql_method_name`, `stackql_verb` and `stackql_object_key` from the mechanical derivation plus `RESOURCE_RULES` / `METHOD_RULES`, and validates: every row mapped or skipped with a reason, every spec operation present, `(service, resource, method)` unique, unique required-parameter signatures per `(resource, sqlVerb)`. Fails without writing on any violation.
+`provider-dev/scripts/map_operations.mjs` fills `stackql_resource_name`, `stackql_method_name`, `stackql_verb` and `stackql_object_key` from the mechanical derivation plus `RESOURCE_RULES` / `METHOD_RULES`, and validates: every row mapped or skipped with a reason, every spec operation present, `(service, resource, method)` unique, unique required-parameter signatures per `(resource, sqlVerb)`. Fails without writing on any violation. Two rules carry the one decision: `POST /v1/systemone` is `evaluations.evaluate` bound as `select` rather than the mechanical `systemones.create` as `insert`.
 
-`provider-dev/config/all_services.csv` is the committed contract of every operation -> resource.method mapping; a diff on regeneration is a breaking-change review.
-
-| Operation pattern | StackQL verb | Resource / method |
-|---|---|---|
-| GET collection | `SELECT` | `<resource>.list` (objectKey from the envelope) |
-| GET single | `SELECT` | `<resource>.get` |
-| POST create | `INSERT` | `<resource>.create` |
-| PATCH / PUT | `UPDATE` | `<resource>.update` |
-| DELETE | `DELETE` | `<resource>.delete` |
-| PATCH / PUT action segment | `EXEC` | `<parent>.update_<segment>` |
-| POST action segment | `EXEC` | `<parent>.<segment>` |
-| POST read (search / query) | `SELECT` | `<resource>.list` (objectKey in post-process) |
+`provider-dev/config/all_services.csv` is the committed contract of every operation -> resource.method mapping; a diff on regeneration is a breaking-change review. Result: 2 rows, both `select`.
 
 ## 3. Normalize
 
@@ -100,26 +101,32 @@ make pre-normalize   # provider-specific passes in provider-dev/scripts/pre_norm
 make normalize       # provider-utils: allOf flatten, oneOf/anyOf lowering, bare-array wrap
 ```
 
+Pass 2 of `pre_normalize.mjs` lowers the vendor's nine `string | object | array (| null)` content unions (`state`, `instructions`, criteria descriptions, the score legend) to `string` so normalize does not leave `additionalProperties: true` and `items: {}` beside a string property. On the SQL surface those values are always strings; a JSON-looking string is sent as the JSON it encodes.
+
 ## 4. Generate
 
 ```bash
-make generate        # rm output, generate (servers, auth, naive bodies, views), post-process, GraphQL merge
+make generate        # rm output, generate (servers, auth, per-service retry policy, naive bodies), post-process, GraphQL merge
 ```
 
-Output: `provider-dev/openapi/src/<name>/v00.00.00000/provider.yaml` + `services/*.yaml` (committed). `provider-dev/scripts/post_process.mjs` re-applies everything the generator cannot express as numbered rules (root-path server overrides, `nativeCasing`, DELETE-body translation, objectKeys on POST reads, pagination, transforms, pushdown, aliases). GraphQL fragments in `provider-dev/source-graphql/` and views in `views/<service>/views.yaml` are merged here.
+Output: `provider-dev/openapi/src/typesafe/v00.00.00000/provider.yaml` + `services/models.yaml` + `services/systemone.yaml` (committed). `--provider-config` carries the bearer auth (`TYPESAFE_API_KEY`); `--service-config` carries the retry policy for the vendor's 429 / 529 contract as each service's document-level `x-stackQL-config` (it must sit at service level: the engine does not consult a provider-level retry block, NOTES.md finding 7). `provider-dev/scripts/post_process.mjs` validates the result; this API needs none of the usual post-generation rules (no objectKey on a POST read, no pagination, no pushdown, no transforms, no aliases). `make graphql-merge` is a no-op (TypeSafe has no GraphQL API).
 
 ## 5. Test
 
 ```bash
-make test-offline        # SHOW / DESCRIBE against the local file registry
-make test-integration    # mock API, row-level and wire-level assertions
-make test-meta           # meta-route walk over a local stackql server
+make test-offline        # SHOW / DESCRIBE against the local file registry (16 checks)
+make test-integration    # mock API, row-level and wire-level assertions (28 checks)
+make test-meta           # meta-route walk over a local stackql server (2 services, 2 resources, 2 methods)
 make smoke               # live (needs .env)
 ```
 
 `npm run probe -- "SELECT ..."` runs ad-hoc SQL against the mock and prints the wire calls.
 
-TODO(template): the smoke suite's design (which Terraform examples it mirrors), its budget, and the gated lifecycle.
+The integration suite proves the flagship binding on the wire: `questions` arrives as a JSON object, a plain `state` as a string and a JSON `state` as the object or array it encodes; `json_extract` reads `answers` and `usage`; mixed question types and a versioned model id pass through; a 429 and a 529 on the first attempt are retried; an unknown model and a malformed question surface the vendor's 400 `api_usage_error`; a statement missing a required body field does not route; a wrong key is a 401. The mock's fixtures and error bodies are the ones the live API returned on 2026-10-05.
+
+The smoke suite (`tests/smoke_test.py`, pystackql) mirrors the vendor's quick-start and API-reference examples because TypeSafe has no Terraform provider to mirror: the models catalog, then nine evaluations (a Noul question, a Choice, a Score, the three mixed, a structured JSON state, the alias resolved to a versioned id and that id pinned, a `json_extract` read). It sums the `usage` column and prints the token total and its cost at `$0.042` per million input tokens (output tokens are free): 2485 input tokens, about `$0.0001`, on the first live run (2026-10-05). Statements are paced at one per second under the documented 80 requests per second.
+
+`bin/validate-docs-examples.sh` checks the getting-started page before a docs publish: it extracts every `sql` block, runs the typesafe statements live (when `TYPESAFE_API_KEY` is set) and routes the aws / k8s / okta / github / anthropic context and action statements through a temporary registry built from a `stackql-provider-registry` clone (`REGISTRY_SRC`) with dummy credentials, so a statement that no longer routes fails the check without touching a real account. 25 statements passed on 2026-10-05 (NOTES.md finding 12).
 
 ## 6. Docs
 
@@ -129,17 +136,17 @@ make website     # yarn install && yarn build (vendors the shared stackql/docusa
 make website-start
 ```
 
-`provider-dev/docgen/provider-data/headerContent1.txt` is the landing-page front matter and pitch; `headerContent2.txt` is the getting-started page (installation, scope, authentication, the scoping variable, rate limit, labelling, example queries - lead with the queries the provider exists for). The examples close the file under an `## Example Queries` heading, the same table-of-contents entry on every provider site: one intro sentence under the H2 (so no heading sits directly on another), then one H3 per example with a one-sentence lead-in ending in a colon and one `sql` block. `website/provider.js` carries the site identity; `website/static/CNAME` the hostname; add `website/static/img/stackql-<name>-provider-featured-image.png`, and keep the favicon files at the `static/` root (the shared config links them root-relative). Commit `website/docs` after every regeneration.
+`provider-dev/docgen/provider-data/headerContent1.txt` is the landing-page front matter and pitch; `headerContent2.txt` is the getting-started page (installation, scope, authentication, evaluations as SELECT, models and aliases, rate limit and retries, example queries). `bin/patch-provider-utils.mjs` (npm `postinstall`) patches provider-utils' docgen so the `evaluate` method documents its three required body fields (in the Methods and Parameters tables) and its SELECT example routes. `website/provider.js` carries the site identity; `website/static/CNAME` the hostname `typesafe-provider.stackql.io`. Commit `website/docs` after every regeneration.
 
 To publish the site: rename `.github/workflows/prod-web-deploy.yml.disabled` and `test-web-deploy.yml.disabled`, enable GitHub Pages (source: GitHub Actions) and add the DNS record:
 
 | Source domain | Record type | Target |
 |---|---|---|
-| `<name>-provider.stackql.io` | CNAME | `stackql.github.io.` |
+| `typesafe-provider.stackql.io` | CNAME | `stackql.github.io.` |
 
 ## 7. Publish
 
-Push the generated `provider-dev/openapi/src/<name>` directory to `providers/src` in a feature branch of [stackql-provider-registry](https://github.com/stackql/stackql-provider-registry) and follow the [registry release flow](https://github.com/stackql/stackql-provider-registry/blob/dev/docs/build-and-deployment.md). Verify from the dev registry, then `make smoke-live`:
+Push the generated `provider-dev/openapi/src/typesafe` directory to `providers/src` in a feature branch of [stackql-provider-registry](https://github.com/stackql/stackql-provider-registry) and follow the [registry release flow](https://github.com/stackql/stackql-provider-registry/blob/dev/docs/build-and-deployment.md). Verify from the dev registry, then `make smoke-live`:
 
 ```bash
 export DEV_REG='{ "url": "https://registry-dev.stackql.app/providers" }'
@@ -147,26 +154,22 @@ stackql --registry="${DEV_REG}" shell
 ```
 
 ```sql
-REGISTRY PULL myprovider;
+REGISTRY PULL typesafe;
 ```
 
 ## 8. CI
 
-`.github/workflows/build-and-test.yml`: on push / PR - `npm ci`, `stackql/setup-stackql`, pin verification (warns on drift), the build steps, a hard failure on uncommitted generation drift, the three credential-free test layers, docs generation; a secret-gated live smoke job (skipped with a notice otherwise; never the gated lifecycle); a weekly `spec-drift` job that fetches, compares with the pin and opens a labelled issue. The web deploy workflows build the site from `main` once enabled.
+`.github/workflows/build-and-test.yml`: on push / PR - `npm ci` (which runs the docgen patch), `stackql/setup-stackql`, pin verification (warns on drift), the build steps, a hard failure on uncommitted generation drift, the three credential-free test layers, docs generation; a secret-gated live smoke job (`TYPESAFE_API_KEY`; skipped with a notice otherwise); a weekly `spec-drift` job that fetches, compares with the pin and opens a labelled issue. The web deploy workflows build the site from `main` once enabled.
 
 ## Authentication reference
 
-`provider-dev/config/provider_config.json` becomes `config:` in `provider.yaml`. Env var names follow the vendor's Terraform provider (unless it only offers `TF_VAR_*` names, then the vendor CLI's). The common `auth.type` values (the full table is in the skill's `scoping-and-auth.md`):
+`provider-dev/config/provider_config.json` becomes `config:` in `provider.yaml`:
 
 ```json
-{"auth": {"type": "bearer", "credentialsenvvar": "VENDOR_TOKEN"}}
-{"auth": {"type": "api_key", "credentialsenvvar": "VENDOR_API_KEY", "valuePrefix": "SSWS "}}
-{"auth": {"type": "basic", "username_var": "VENDOR_KEY_ID", "password_var": "VENDOR_KEY_SECRET"}}
-{"auth": {"type": "custom", "location": "header", "name": "X-API-Key", "credentialsenvvar": "VENDOR_API_KEY"}}
-{"auth": {"type": "oauth2", "grant_type": "client_credentials", "client_id_env_var": "VENDOR_CLIENT_ID", "client_secret_env_var": "VENDOR_CLIENT_SECRET", "token_url": "https://auth.vendor.com/oauth/token"}}
+{"auth": {"type": "bearer", "credentialsenvvar": "TYPESAFE_API_KEY"}}
 ```
 
-A user can override at runtime with `stackql --auth='{"<provider>": {...}}'`.
+TypeSafe has no Terraform provider; `TYPESAFE_API_KEY` is the variable the vendor's Python and JavaScript SDKs and every docs example read. Create a key at `https://console.typesafe.ai/keys` (early access is behind a waitlist at `https://typesafe.ai`). A user can override at runtime with `stackql --auth='{"typesafe": {"type": "bearer", "credentialsenvvar": "MY_OTHER_VAR"}}'`.
 
 ## Contributing
 

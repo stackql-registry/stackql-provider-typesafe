@@ -44,6 +44,10 @@ const BACKTICKED = /`<([A-Za-z][A-Za-z0-9_.:-]*)>`/g;
 // Control-char sentinels: cannot occur in generated markdown.
 const OPEN = '';
 const CLOSE = '';
+// docgen renders newlines in a vendor description as <br />; the tag is
+// MDX-safe, so it is kept as a line break rather than escaped to text.
+const BR_TAG = /<br\s*\/?>/g;
+const BR = '';
 
 let filesChanged = 0;
 let cellsEscaped = 0;
@@ -62,7 +66,7 @@ function annotateScope(lines) {
 }
 
 function escapeDescription(inner) {
-  let out = inner.replace(BACKTICKED, (m, name) => OPEN + name + CLOSE);
+  let out = inner.replace(BACKTICKED, (m, name) => OPEN + name + CLOSE).replace(BR_TAG, BR);
   out = out
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -76,7 +80,7 @@ function escapeDescription(inner) {
     // and Docusaurus crashes on regex-shaped ones. A zero-width space inside
     // "://" is invisible in rendering but breaks the autolink prefix match.
     .replace(/:\/\//g, ':​//');
-  out = out.split(OPEN).join('<code>&lt;').split(CLOSE).join('&gt;</code>');
+  out = out.split(OPEN).join('<code>&lt;').split(CLOSE).join('&gt;</code>').split(BR).join('<br />');
   return out;
 }
 

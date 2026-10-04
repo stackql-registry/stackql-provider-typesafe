@@ -5,13 +5,17 @@
 // command line, printing stackql's stdout/stderr and the wire calls the mock
 // saw for each. This is how bindings get debugged.
 //
-// Usage: npm run probe -- "SELECT ..." "EXEC ..." [--env KEY=VALUE ...] [--unset KEY]
+// Usage: npm run probe -- "SELECT ..." [--env KEY=VALUE ...] [--unset KEY]
+//
+// Example (the flagship binding):
+//   npm run probe -- "SELECT model, answers FROM typesafe.systemone.evaluations WHERE state = 'Help! My payouts have been failing for 3 days.' AND model = 'jev-latest' AND questions = '{\"is_urgent\": {\"type\": \"noul\", \"instructions\": \"Does this convey urgency?\"}}'"
 
-import { startMockServer, EXPECTED_TOKEN, ORG_ID } from './mock_myprovider_server.mjs';
+import { startMockServer, EXPECTED_TOKEN } from './mock_typesafe_server.mjs';
 import { buildTestRegistry, registryArg, makeRunSql, findStackql } from './harness.mjs';
 
-// TODO(template): the environment the provider reads (as in run_integration_tests.mjs)
-const PROVIDER_ENV = { MYPROVIDER_API_TOKEN: EXPECTED_TOKEN, MYPROVIDER_ORG_ID: ORG_ID };
+// The environment the provider reads (as in run_integration_tests.mjs): the
+// bearer key only - the API has no scoping variable.
+const PROVIDER_ENV = { TYPESAFE_API_KEY: EXPECTED_TOKEN };
 
 const args = process.argv.slice(2);
 const sqls = [];
@@ -22,7 +26,7 @@ for (let i = 0; i < args.length; i++) {
   else sqls.push(args[i]);
 }
 if (sqls.length === 0) {
-  console.error('usage: npm run probe -- "SELECT ..." ["EXEC ..."] [--env KEY=VALUE] [--unset KEY]');
+  console.error('usage: npm run probe -- "SELECT ..." [--env KEY=VALUE] [--unset KEY]');
   process.exit(2);
 }
 
@@ -38,7 +42,7 @@ try {
     console.log(`\n=== ${sql}`);
     console.log(`stdout: ${stdout.slice(0, 1200)}`);
     if (stderr) console.log(`stderr: ${stderr.slice(0, 800)}`);
-    for (const e of log.slice(mark)) console.log(`wire: ${e.method} ${e.path} query=${JSON.stringify(e.query)} ct=${e.contentType} body=${JSON.stringify(e.body)}`);
+    for (const e of log.slice(mark)) console.log(`wire: ${e.method} ${e.path} query=${JSON.stringify(e.query)} ct=${e.contentType} auth=${e.authorization ? 'bearer' : 'none'} body=${JSON.stringify(e.body)}`);
   }
 } finally {
   server.close();

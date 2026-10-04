@@ -1,4 +1,7 @@
 {
-  "description": "Service split for the myprovider provider. Ordered path rules (JavaScript regex against the full path key), first match wins; every operation path must match a rule or bin/split.mjs and build_inventory.mjs fail without writing. Aim for 8-20 services named for what a user would look for (projects, config, network, secrets, ...), not the vendor's controller names. A rule with \"excluded\": true classifies the path for the inventory but the service is never emitted (use it for a service whose every operation is skip-coded).",
-  "rules": []
+  "description": "Service split for the typesafe provider. Ordered path rules (JavaScript regex against the full path key), first match wins; every operation path must match a rule or bin/split.mjs and build_inventory.mjs fail without writing. The published API has two operations: the System One evaluation endpoint (the inference plane, service `systemone`) and the models catalog (the control plane, service `models`). A new upstream path that matches neither rule fails the build so it is classified deliberately.",
+  "rules": [
+    { "pathRegex": "^/v1/systemone$", "service": "systemone" },
+    { "pathRegex": "^/v1/models(/|$)", "service": "models" }
+  ]
 }

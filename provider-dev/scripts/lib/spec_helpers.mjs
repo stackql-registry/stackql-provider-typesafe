@@ -4,10 +4,9 @@
 // and the test harnesses. Single-sourced so the inventory and the
 // authoritative mapping can never disagree on a classification.
 //
-// TODO(template): fill in the constants block, then extend the rule tables
-// (SKIP_RULES, ACTION_SEGMENTS, POST_EXEC_SEGMENTS, ENVELOPE_KEY_PREFERENCE)
-// as the inventory reveals what the API needs. Everything below the
-// constants is generic and normally needs no change.
+// The constants block is the typesafe build's decisions (see CLAUDE.md and
+// NOTES.md): a fixed host, no scoping prefix, a snake_case wire, the vendor's
+// published OpenAPI document. Everything below the constants is generic.
 
 import fs from 'fs';
 import path from 'path';
@@ -18,16 +17,16 @@ import yaml from 'js-yaml';
 // Provider constants
 // ---------------------------------------------------------------------------
 
-export const PROVIDER_NAME = 'myprovider';
-export const PROVIDER_TITLE = 'My Provider';
+export const PROVIDER_NAME = 'typesafe';
+export const PROVIDER_TITLE = 'TypeSafe';
 
 // The bare API base (no trailing slash). Used for path-level server overrides
 // of root paths and by the integration runner to redirect to the mock.
-export const API_BASE_URL = 'https://api.example.com';
+export const API_BASE_URL = 'https://api.typesafe.ai';
 
 // Where the vendor publishes the spec and the snapshot filename under
 // provider-dev/downloaded/ (.json or .yaml - both are handled).
-export const SPEC_URL = 'https://api.example.com/openapi.json';
+export const SPEC_URL = 'https://api.typesafe.ai/openapi.json';
 export const SPEC_FILE = `${PROVIDER_NAME}-v1.json`;
 
 // A static path prefix stripped before resource-name derivation (the API
@@ -258,9 +257,8 @@ export const SKIP_RULES = [
   { code: 'head_count_endpoint', test: (p, op) => op.method === 'head' },
   { code: 'oauth_user_agent_flow', test: (p) => /\/oauth\/(authorize|callback)/i.test(p) },
   { code: 'websocket_or_sse_stream', test: (p, op, body, resp) => resp.mediaTypes.some((m) => /event-stream/.test(m)) || /\/(ws|websocket|stream)$/i.test(p) }
-  // TODO(template): provider-specific rules, e.g.
-  // { code: 'prometheus_text_metrics', test: (p) => /\/prometheus$/.test(p) },
-  // { code: 'deprecated_superseded', test: (p, op) => op.deprecated && /\/scaling$/.test(p) }
+  // typesafe: no provider-specific skip rules - both published operations
+  // map (see provider-dev/config/endpoint_inventory.csv).
 ];
 
 export function skipReason(pathKey, op, resolve, verb) {

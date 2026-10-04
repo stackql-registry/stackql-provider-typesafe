@@ -50,8 +50,8 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 echo "Fetching spec from $SPEC_URL"
-# TODO(template): add auth headers here if the vendor gates its spec
-# (curl -H "Authorization: Bearer $X" ...); never commit the value.
+# The TypeSafe document is served unauthenticated (NOTES.md finding 1), so
+# no auth header is needed here.
 curl -fsSL "$SPEC_URL" -o "$TMP_DIR/$SPEC_FILE"
 
 UPDATE="$UPDATE" TMP_DIR="$TMP_DIR" DOWNLOAD_DIR="$DOWNLOAD_DIR" PIN_FILE="$PIN_FILE" \

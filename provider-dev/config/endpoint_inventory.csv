@@ -1,0 +1,3 @@
+method,path,operation_id,tags,scope,path_params,pagination_params,has_request_body,body_media_types,body_bare_array,update_semantics,labels,response_shape,response_array_props,response_media_types,proposed_service,proposed_resource,proposed_method,proposed_verb,proposed_object_key,skip_reason
+post,/v1/systemone,systemone_v1_systemone_post,,none,,,y,application/json,,,,object,,application/json,systemone,systemones,create,insert,,
+get,/v1/models,models_v1_v1_models_get,,none,,,n,,,,,object,models,application/json,models,models,list,select,$.models,

@@ -1,3 +1,35 @@
+---
+title: typesafe
+hide_title: false
+hide_table_of_contents: false
+keywords:
+  - typesafe
+  - jev
+  - system one
+  - stackql
+  - mcp
+  - ai agents
+  - infrastructure-as-code
+  - configuration-as-data
+  - cloud inventory
+description: Run Jev, TypeSafe AI's System One decision model, as a SELECT - typed decisions over any StackQL provider's rows for agent routines, with the models catalog alongside
+custom_edit_url: null
+image: /img/stackql-typesafe-provider-featured-image.png
+id: 'provider-intro'
+---
+
+import CopyableCode from '@site/src/components/CopyableCode/CopyableCode';
+
+The `typesafe` provider maps the TypeSafe AI API (`https://api.typesafe.ai`) to SQL: the System One evaluation endpoint behind Jev, TypeSafe's flagship model (`typesafe.systemone.evaluations`), and the models catalog an API key can use (`typesafe.models.models`). A System One request evaluates a `state` (text or JSON) against named, typed questions - Noul (yes/no probability), Choice (one option from a set, with a probability per option and a confidence) and Score (an ordered rubric, with an expected score, a legend and probabilities) - and returns typed answers rather than text. In the provider that request is a `SELECT`: the WHERE clause carries the state, the model and the questions, and the row carries the model that answered, the answers map and the token usage, ready for `json_extract`. In an agent routine over the StackQL MCP server, rows from any other provider become the state, Jev makes the judgment call, and a StackQL mutation runs only when the answer clears the routine's threshold.
+
+
+:::info[Provider Summary] 
+
+total services: __2__  
+total resources: __2__  
+
+:::
+
 See also:
 [[` SHOW `]](https://stackql.io/docs/language-spec/show) [[` DESCRIBE `]](https://stackql.io/docs/language-spec/describe)  [[` REGISTRY `]](https://stackql.io/docs/language-spec/registry)
 * * *
@@ -360,3 +392,14 @@ UNION ALL
 SELECT 'anthropic', id, created_at
 FROM anthropic.models.models;
 ```
+
+
+## Services
+<div class="row">
+<div class="providerDocColumn">
+<a href="/services/models/">models</a><br />
+</div>
+<div class="providerDocColumn">
+<a href="/services/systemone/">systemone</a><br />
+</div>
+</div>
