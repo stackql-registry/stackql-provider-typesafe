@@ -1,0 +1,27 @@
+{
+  "specs": {
+    "typesafe-v1": {
+      "url": "https://api.typesafe.ai/openapi.json",
+      "filename": "typesafe-v1.json",
+      "spec_version": "0.2.0",
+      "openapi": "3.1.0",
+      "paths": 2,
+      "operations": 2,
+      "sha256": "a191f8a7df6bd6fedced8120dd0fd106f88575d1d1c8360d08900a6c7c0360d5",
+      "sanitized_sha256": "00bb0580854e0caf0d1342ea54b3d3da82984be1a57131c026c3b4fcca5b5fc1",
+      "fixes": {
+        "type_null_to_nullable": 7,
+        "type_array_lowered": 0,
+        "numeric_exclusive_bounds": 0,
+        "property_names_removed": 0,
+        "schema_dialect_key_removed": 0,
+        "const_to_enum": 6,
+        "hide_definitions_removed": 0,
+        "openapi_3_1_2_to_3_1_1": 0
+      },
+      "redactions": {},
+      "bytes": 14158,
+      "fetched": "2026-10-04"
+    }
+  }
+}

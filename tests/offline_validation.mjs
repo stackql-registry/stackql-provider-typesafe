@@ -2,16 +2,11 @@
 
 // Offline validation of the generated provider against the local file
 // registry - no network, no server. Runs SHOW SERVICES / SHOW RESOURCES /
-// SHOW METHODS and DESCRIBE EXTENDED over representative resources and
-// asserts the expected surface: service and resource names, verbs and
-// required params, the x-stackQL-envVar behaviour of the scoping variable,
-// snake_case aliases, wrapped arrays and objectKey projections, views, the
-// flagship binding. Exit 1 on any failure.
-//
-// TODO(template): fill EXPECTED_SERVICES / EXPECTED_RESOURCES from the
-// mapping summary (make mappings prints resources per service) and add the
-// representative DESCRIBE / SHOW METHODS checks. The run FAILS while the
-// tables are empty so an unfinished suite cannot pass `make all`.
+// SHOW METHODS and DESCRIBE EXTENDED over every resource and asserts the
+// expected surface: service and resource names, the verb and required
+// params of each method (the flagship POST-as-SELECT binding routes on its
+// body fields), the projected columns, and that nothing is bound to a
+// mutating verb (the API has no mutable resources). Exit 1 on any failure.
 //
 // Usage: node tests/offline_validation.mjs
 // Binary resolution: $STACKQL, ./stackql(.exe), then PATH.
@@ -21,7 +16,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { PROVIDER_NAME, SCOPE_PARAM } from '../provider-dev/scripts/lib/spec_helpers.mjs';
+import { PROVIDER_NAME } from '../provider-dev/scripts/lib/spec_helpers.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const regPath = path.join(repoRoot, 'provider-dev', 'openapi').replace(/\\/g, '/');
@@ -29,17 +24,31 @@ const registry = JSON.stringify({ url: `file://${regPath}`, localDocRoot: regPat
 
 // ---------------------------------------------------------------------------
 // Expectations. Exact sorted lists - a regeneration that adds or renames a
-// resource must update these deliberately.
+// resource must update these deliberately (and is a breaking-change review
+// of all_services.csv first).
 // ---------------------------------------------------------------------------
 
-const EXPECTED_SERVICES = [];            // e.g. ['backups', 'keys', 'organizations', 'services']
-const EXPECTED_RESOURCES = {};           // e.g. { keys: ['keys'], services: ['services', 'private_endpoints'] }
+const EXPECTED_SERVICES = ['models', 'systemone'];
+const EXPECTED_RESOURCES = {
+  models: ['models'],
+  systemone: ['evaluations']
+};
 
-// The env var behind the scoping server variable (null when the API has no
-// scope). With it unset the variable is a required param on every scoped
-// method; with it set the param disappears from SHOW METHODS.
-const SCOPE_ENV_VAR = null;              // e.g. 'MYPROVIDER_ORG_ID'
-const SCOPED_RESOURCE = null;            // e.g. 'services.services' - a resource under the scoped server
+// method -> { verb, required: [...] } per resource. The evaluation POST is
+// SELECT-routed on its three required body fields (naive body translation):
+// a statement without any of them cannot route.
+const EXPECTED_METHODS = {
+  'models.models': { list: { verb: 'SELECT', required: [] } },
+  'systemone.evaluations': { evaluate: { verb: 'SELECT', required: ['model', 'questions', 'state'] } }
+};
+
+// Columns each selectable resource projects (DESCRIBE EXTENDED). `answers`
+// and `usage` are JSON columns (json_extract), the vendor's wire names are
+// already snake_case so no aliases are involved.
+const EXPECTED_COLUMNS = {
+  'models.models': ['description', 'name', 'release_date'],
+  'systemone.evaluations': ['answers', 'model', 'usage']
+};
 
 // ---------------------------------------------------------------------------
 
@@ -77,49 +86,53 @@ function check(name, cond, note = '') {
 }
 const names = (rows, key = 'name') => rows.map((x) => x[key]).sort();
 const methodsByName = (rows) => Object.fromEntries(rows.map((m) => [m.MethodName, m]));
+const sameList = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
+const requiredOf = (m) => String(m?.RequiredParams || '').split(',').map((s) => s.trim()).filter(Boolean);
 
 console.log(`stackql: ${bin}`);
 console.log(`registry: ${regPath}`);
 
 // --- services
 let r = await runSql(`SHOW SERVICES IN ${PROVIDER_NAME}`);
-if (EXPECTED_SERVICES.length === 0) {
-  check('EXPECTED_SERVICES is populated (TODO)', false, `SHOW SERVICES returned: ${JSON.stringify(names(r.rows))}`);
-} else {
-  check(`SHOW SERVICES (${EXPECTED_SERVICES.length})`, JSON.stringify(names(r.rows)) === JSON.stringify([...EXPECTED_SERVICES].sort()), r.stderr || JSON.stringify(names(r.rows)));
-}
+check(`SHOW SERVICES (${EXPECTED_SERVICES.length})`, sameList(names(r.rows), EXPECTED_SERVICES), r.stderr || JSON.stringify(names(r.rows)));
 
 // --- resources per service
 for (const [svc, expected] of Object.entries(EXPECTED_RESOURCES)) {
   r = await runSql(`SHOW RESOURCES IN ${PROVIDER_NAME}.${svc}`);
-  check(`SHOW RESOURCES IN ${PROVIDER_NAME}.${svc} (${expected.length})`, JSON.stringify(names(r.rows)) === JSON.stringify([...expected].sort()), r.stderr || JSON.stringify(names(r.rows)));
+  check(`SHOW RESOURCES IN ${PROVIDER_NAME}.${svc} (${expected.length})`, sameList(names(r.rows), expected), r.stderr || JSON.stringify(names(r.rows)));
 }
 
-// --- scoping variable behaviour (x-stackQL-envVar)
-if (SCOPE_ENV_VAR && SCOPED_RESOURCE && SCOPE_PARAM) {
-  r = await runSql(`SHOW METHODS IN ${PROVIDER_NAME}.${SCOPED_RESOURCE}`, { [SCOPE_ENV_VAR]: undefined });
-  const unset = methodsByName(r.rows);
-  check(`${SCOPE_PARAM} is required when ${SCOPE_ENV_VAR} is unset`, Object.values(unset).some((m) => String(m.RequiredParams || '').includes(SCOPE_PARAM)), r.stderr || JSON.stringify(unset));
-  r = await runSql(`SHOW METHODS IN ${PROVIDER_NAME}.${SCOPED_RESOURCE}`, { [SCOPE_ENV_VAR]: 'offline-validation' });
-  const set = methodsByName(r.rows);
-  check(`${SCOPE_PARAM} is optional when ${SCOPE_ENV_VAR} is set (x-stackQL-envVar)`, r.rows.length > 0 && !Object.values(set).some((m) => String(m.RequiredParams || '').includes(SCOPE_PARAM)), r.stderr || JSON.stringify(set));
+// --- methods: verb and required params, nothing bound to a mutating verb
+for (const [res, expectedMethods] of Object.entries(EXPECTED_METHODS)) {
+  r = await runSql(`SHOW EXTENDED METHODS IN ${PROVIDER_NAME}.${res}`);
+  const got = methodsByName(r.rows);
+  check(`${res} methods are exactly ${Object.keys(expectedMethods).join(', ')}`, sameList(Object.keys(got), Object.keys(expectedMethods)), r.stderr || JSON.stringify(Object.keys(got)));
+  for (const [m, exp] of Object.entries(expectedMethods)) {
+    check(`${res}.${m} is ${exp.verb}`, got[m]?.SQLVerb === exp.verb, JSON.stringify(got[m]));
+    check(`${res}.${m} required params [${exp.required.join(', ')}]`, sameList(requiredOf(got[m]), exp.required), JSON.stringify(got[m]?.RequiredParams));
+  }
+  check(`${res} has no INSERT / UPDATE / DELETE / REPLACE method`, Object.values(got).every((m) => m.SQLVerb === 'SELECT' || m.SQLVerb === 'EXEC'), JSON.stringify(Object.values(got).map((m) => m.SQLVerb)));
 }
 
-// --- representative resources. TODO(template): one block per archetype:
-//   - verbs and required params on a full-lifecycle resource
-//   - DESCRIBE EXTENDED: snake aliases present, camel names absent
-//   - a wide flat config resource (column count)
-//   - a wrapped bare-array list (the wrapper key is NOT a column)
-//   - an objectKey projection ($.result.costs rows, not the envelope)
-//   - each view: SELECT * FROM <provider>.<service>.<view> parses
-//   - the flagship binding exists
-//
-// r = await runSql(`SHOW METHODS IN ${PROVIDER_NAME}.keys.keys`);
-// const km = methodsByName(r.rows);
-// check('keys.keys verbs', km.list?.SQLVerb === 'SELECT' && km.create?.SQLVerb === 'INSERT' && km.update?.SQLVerb === 'UPDATE' && km.delete?.SQLVerb === 'DELETE', JSON.stringify(km));
-// r = await runSql(`DESCRIBE EXTENDED ${PROVIDER_NAME}.keys.keys`);
-// const cols = names(r.rows);
-// check('keys.keys snake_case columns', ['id', 'name', 'created_at'].every((c) => cols.includes(c)) && !cols.includes('createdAt'), JSON.stringify(cols));
+// --- columns
+for (const [res, expectedCols] of Object.entries(EXPECTED_COLUMNS)) {
+  r = await runSql(`DESCRIBE EXTENDED ${PROVIDER_NAME}.${res}`);
+  const cols = names(r.rows);
+  check(`DESCRIBE EXTENDED ${res} columns [${expectedCols.join(', ')}]`, sameList(cols, expectedCols), r.stderr || JSON.stringify(cols));
+  const types = Object.fromEntries(r.rows.map((x) => [x.name, x.type]));
+  if (res === 'systemone.evaluations') {
+    check('evaluations.answers and usage are object (JSON) columns, model is a string', types.answers === 'object' && types.usage === 'object' && types.model === 'string', JSON.stringify(types));
+  }
+  if (res === 'models.models') {
+    check('models.models columns are strings', Object.values(types).every((t) => t === 'string'), JSON.stringify(types));
+  }
+}
+
+// --- the flagship binding: the SELECT method documents the vendor's
+// operation (description passes through verbatim)
+r = await runSql(`SHOW EXTENDED METHODS IN ${PROVIDER_NAME}.systemone.evaluations`);
+const evaluate = methodsByName(r.rows).evaluate;
+check('evaluations.evaluate carries the vendor operation description', /questions about the content supplied in `state`/.test(String(evaluate?.description || '')), JSON.stringify(evaluate?.description).slice(0, 120));
 
 const failed = results.filter((x) => !x.pass);
 console.log(`\n${results.length - failed.length}/${results.length} passed`);

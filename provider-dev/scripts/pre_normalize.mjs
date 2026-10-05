@@ -149,18 +149,54 @@ export function declareQueryParam(pathRe, verb, param) {
   };
 }
 
+// Collapse the vendor's free-form content unions - `anyOf` of string | object
+// (additionalProperties: true) | array (items: {}) | null on `state`,
+// `instructions`, the Noul criteria descriptions, the Choice criteria values,
+// the Score criteria levels and the Score answer legend - to a (nullable)
+// string. Left alone, provider-utils normalize merges the members into one
+// schema that carries `type: string` plus a stray `additionalProperties: true`
+// and `items: {}`. On the SQL surface these values are always supplied as
+// strings (a JSON-looking string is sent as the JSON it encodes under naive
+// body translation), so a string is the honest type; the vendor's title,
+// description and examples are kept verbatim. Unions with any other member
+// (ValidationError.loc items: string | integer) are untouched.
+export function lowerContentUnions() {
+  const isContentMember = (m) => !!m && (
+    m.type === 'string' ||
+    (m.type === 'object' && m.additionalProperties === true && !m.properties) ||
+    (m.type === 'array' && m.items && typeof m.items === 'object' && Object.keys(m.items).length === 0) ||
+    m.nullable === true || m.type === 'null'
+  );
+  return (doc) => {
+    let n = 0;
+    walkSchemas(doc, (o) => {
+      if (!Array.isArray(o.anyOf) || o.anyOf.length < 2 || !o.anyOf.every(isContentMember)) return;
+      if (!o.anyOf.some((m) => m.type === 'string')) return;
+      const nullable = o.anyOf.some((m) => m.nullable === true || m.type === 'null');
+      delete o.anyOf;
+      o.type = 'string';
+      if (nullable) o.nullable = true;
+      n++;
+    });
+    return n;
+  };
+}
+
+function walkSchemas(node, visit) {
+  if (Array.isArray(node)) { node.forEach((v) => walkSchemas(v, visit)); return; }
+  if (!node || typeof node !== 'object') return;
+  visit(node);
+  for (const v of Object.values(node)) walkSchemas(v, visit);
+}
+
 // ---------------------------------------------------------------------------
-// The pass list. TODO(template): enable / add passes as the API needs them.
-// Every entry: { name, run: (doc, filename, errors) => count }
+// The pass list - the typesafe passes (NOTES.md finding 5). Every entry:
+// { name, run: (doc, filename, errors) => count }
 // ---------------------------------------------------------------------------
 
 const PASSES = [
-  { name: '1. prefer application/json request bodies', run: preferJsonRequestBody() }
-  // { name: '2. drop deprecated query params duplicating the body', run: dropQueryParamsDuplicatingBody(/\/secrets$/) },
-  // { name: '3. secrets: single-item body (transform in post_process)', run: bareArrayBodyToItem(/\/secrets$/, 'post') },
-  // { name: '4. query endpoint: rows schema', run: injectResponseSchema(/\/query$/, 'post', '201', { type: 'object', properties: { rows: { type: 'array', items: { type: 'object' } } } }) },
-  // { name: '5. drop camelCase duplicates', run: dropCamelDuplicates() },
-  // { name: '6. declare reveal on secrets list', run: declareQueryParam(/\/secrets$/, 'get', { name: 'reveal', schema: { type: 'boolean' }, description: 'Return secret values.' }) }
+  { name: '1. prefer application/json request bodies', run: preferJsonRequestBody() },
+  { name: '2. lower free-form content unions (string | object | array | null) to string', run: lowerContentUnions() }
 ];
 
 const files = fs.existsSync(sourceDir) ? fs.readdirSync(sourceDir).filter((f) => f.endsWith('.yaml')).sort() : [];

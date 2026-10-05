@@ -1,0 +1,3 @@
+filename,path,operationId,formatted_op_id,verb,response_object,tags,formatted_tags,stackql_resource_name,stackql_method_name,stackql_verb,stackql_object_key,op_description
+models.yaml,/v1/models,models_v1_v1_models_get,models_v1_v1_models_get,get,ModelMetadataList,,,models,list,select,$.models,Models V1
+systemone.yaml,/v1/systemone,systemone_v1_systemone_post,systemone_v1_systemone_post,post,SystemOneResponse,,,evaluations,evaluate,select,,Systemone

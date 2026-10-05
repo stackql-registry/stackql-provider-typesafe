@@ -43,21 +43,31 @@ const csvPath = path.join(REPO_ROOT, 'provider-dev', 'config', 'all_services.csv
 const report = process.argv.includes('--report');
 
 // ---------------------------------------------------------------------------
-// Override tables. TODO(template): add rules as services come online.
+// Override tables - the typesafe mapping decisions (CLAUDE.md "The flagship
+// mapping", NOTES.md finding 4).
 // ---------------------------------------------------------------------------
 
 // Explicit resource-name overrides, matched on (service optional, verb
 // optional, normalized path with params collapsed to {}). First match wins.
 const RESOURCE_RULES = [
-  // { service: 'services', re: /\/clickhouseSettings\/schema$/, resource: 'clickhouse_settings_schemas' },
-  // { service: 'postgres', re: /\/postgres(\/\{\})?$/, resource: 'services' }
+  // POST /v1/systemone is the System One evaluation endpoint: a request
+  // evaluates one `state` against named questions and returns the answers.
+  // The mechanical derivation would pluralise the path segment
+  // ("systemones"); the resource is what the request produces.
+  { service: 'systemone', re: /^\/v1\/systemone$/, resource: 'evaluations' }
 ];
 
 // Method-name / verb / objectKey overrides for cases the generic rules
 // cannot express, matched on (verb, normalized path). First match wins.
 const METHOD_RULES = [
-  // { verb: 'get', re: /\/usageCost$/, method: 'list', sqlVerb: 'select', objectKey: '$.result.costs' },
-  // { verb: 'get', re: /\/settings$/, method: 'list', sqlVerb: 'select', objectKey: '$.result' }
+  // The evaluation POST is a read: nothing is created, nothing can be
+  // listed or deleted afterwards, and the response IS the result set (one
+  // row: model, answers, usage). It binds as SELECT, the anthropic
+  // messages.create precedent (POST-as-SELECT), not INSERT ... RETURNING
+  // (the supabase query-endpoint precedent, where the statement mutates).
+  // The required body fields (state, model, questions) become the WHERE
+  // keys under naive body translation.
+  { verb: 'post', re: /^\/v1\/systemone$/, method: 'evaluate', sqlVerb: 'select', objectKey: '' }
 ];
 
 // ---------------------------------------------------------------------------

@@ -180,7 +180,8 @@ function validateResources() {
 }
 
 // ---------------------------------------------------------------------------
-// The rules. TODO(template): add provider-specific calls in numbered order.
+// The rules, in numbered order (typesafe needs the generic three plus the
+// retry validation; see the comments below for what the API does not need).
 // ---------------------------------------------------------------------------
 
 // 1. root paths outside the scoped server template
@@ -189,14 +190,23 @@ pinRootPaths();
 setNativeCasing(WIRE_CASING);
 // 3. DELETE bodies
 naiveDeleteBodies();
-// 4-9. provider-specific, e.g.
-// setObjectKey('database', 'queries', 'list', '$.rows');
-// setServicePagination('udfs', { requestToken: { key: 'cursor', location: 'query' }, responseToken: { key: '$.result.pagination.nextCursor', location: 'body' } });
-// setMethodPagination('activity', 'events', 'list', { requestToken: { key: '', location: 'request' }, responseToken: { key: 'Link', location: 'header' } });
-// setContentsTransform('reports', 'exports', 'get', 'application/pdf');
-// setRequestTransform('secrets', 'secrets', 'create', '[{{ . }}]');
-// setPushdown('projects', { top: { dialect: 'custom', paramName: 'limit', maxValue: 1000 } });
-// setParamAlias('projects', '/projects/{ref}', 'get', 'ref', 'project_ref');
+// 4-9. not needed by the TypeSafe API: the evaluation POST returns one
+// object row (no objectKey), neither operation pages or takes query
+// parameters (no pagination, no pushdown), every payload is JSON (no
+// transforms) and the wire is snake_case (no aliases). The retry policy for
+// the vendor's 429 / 529 contract is the generator's --service-config
+// (provider-dev/config/service_config.json); it must sit at service level
+// because the engine does not consult a provider-level retry block
+// (NOTES.md finding 7) - validated here so a Makefile change cannot drop it.
+function validateServiceRetry() {
+  for (const [f, doc] of docs) {
+    const retry = doc['x-stackQL-config']?.retry;
+    if (!retry || !Array.isArray(retry.retryable_methods) || !retry.retryable_methods.includes('POST')) {
+      errors.push(`${f}: x-stackQL-config.retry with POST in retryable_methods is missing - generate must pass --service-config provider-dev/config/service_config.json`);
+    }
+  }
+}
+validateServiceRetry();
 
 validateResources();
 

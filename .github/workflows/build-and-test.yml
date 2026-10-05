@@ -1,12 +1,11 @@
 name: build-and-test
 
-# Build the myprovider provider from the pinned spec and run every
+# Build the typesafe provider from the pinned spec and run every
 # credential-free test layer on each push / PR; the live smoke suite runs
 # only where the secrets are configured; a scheduled spec-drift job diffs the
 # served spec against the pin and opens an issue when it moves (drift is
 # expected and must be reviewed, never silent).
 #
-# TODO(template): set the secret names to the variables the provider reads.
 
 on:
   push:
@@ -101,15 +100,14 @@ jobs:
 
   smoke:
     # secret-gated live smoke suite against the dedicated dev account;
-    # skipped with a notice when the secrets are not configured (forks, PRs
-    # from outside). Never the expensive gated lifecycle - trigger that
-    # deliberately with `make smoke-gated-lifecycle`.
+    # skipped with a notice when the secret is not configured (forks, PRs
+    # from outside). The suite bills a handful of System One evaluations
+    # (well under one cent); there is no gated lifecycle in this API.
     runs-on: ubuntu-latest
     needs: build-and-test
     if: github.event_name != 'pull_request' && github.event_name != 'schedule'
     env:
-      MYPROVIDER_API_TOKEN: ${{ secrets.MYPROVIDER_API_TOKEN }}
-      MYPROVIDER_ORG_ID: ${{ secrets.MYPROVIDER_ORG_ID }}
+      TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
     steps:
       - uses: actions/checkout@v7
 
@@ -126,13 +124,13 @@ jobs:
         run: npm ci
 
       - name: Live smoke suite
-        if: env.MYPROVIDER_API_TOKEN != ''
+        if: env.TYPESAFE_API_KEY != ''
         run: make smoke
 
       - name: Live smoke skipped (no credentials)
-        if: env.MYPROVIDER_API_TOKEN == ''
+        if: env.TYPESAFE_API_KEY == ''
         run: |
-          echo "::notice title=Live smoke suite skipped::MYPROVIDER_API_TOKEN secrets are not configured - the live smoke suite did not run. Credential-free coverage still ran via the mock-server integration suite."
+          echo "::notice title=Live smoke suite skipped::TYPESAFE_API_KEY secrets are not configured - the live smoke suite did not run. Credential-free coverage still ran via the mock-server integration suite."
 
   spec-drift:
     # Diff the served spec against the pin on a schedule and on demand, and
