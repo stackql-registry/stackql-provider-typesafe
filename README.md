@@ -131,12 +131,12 @@ The smoke suite (`tests/smoke_test.py`, pystackql) mirrors the vendor's quick-st
 ## 6. Docs
 
 ```bash
-make docs        # generate website/docs (snake_case surface) and sanitize for MDX
+make docs        # generate website/docs (snake_case surface, source project link) and sanitize for MDX
 make website     # yarn install && yarn build (vendors the shared stackql/docusaurus-config)
 make website-start
 ```
 
-`provider-dev/docgen/provider-data/headerContent1.txt` is the landing-page front matter and pitch; `headerContent2.txt` is the getting-started page (installation, scope, authentication, evaluations as SELECT, models and aliases, rate limit and retries, example queries). `bin/patch-provider-utils.mjs` (npm `postinstall`) patches provider-utils' docgen so the `evaluate` method documents its three required body fields (in the Methods and Parameters tables) and its SELECT example routes. `website/provider.js` carries the site identity; `website/static/CNAME` the hostname `typesafe-provider.stackql.io`. Commit `website/docs` after every regeneration.
+`provider-dev/docgen/provider-data/headerContent1.txt` is the landing-page front matter and pitch; `headerContent2.txt` is the getting-started page (installation, scope, authentication, evaluations as SELECT, models and aliases, rate limit and retries, example queries). `bin/patch-provider-utils.mjs` (npm `postinstall`) patches provider-utils' docgen so the `evaluate` method documents its three required body fields (in the Methods and Parameters tables) and its SELECT example routes. `website/provider.js` carries the site identity; `website/static/CNAME` the hostname `typesafe-provider.stackql.io`. Commit `website/docs` after every regeneration. The Makefile variable `SOURCE_PROJECT` (default: this repository's GitHub URL) is passed to docgen as `--source-project` and becomes the `source project` link in the landing page's Provider Summary; override it on the `make` command line for a fork.
 
 To publish the site: rename `.github/workflows/prod-web-deploy.yml.disabled` and `test-web-deploy.yml.disabled`, enable GitHub Pages (source: GitHub Actions) and add the DNS record:
 

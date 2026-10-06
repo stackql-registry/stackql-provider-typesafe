@@ -27,6 +27,7 @@ The `typesafe` provider maps the TypeSafe AI API (`https://api.typesafe.ai`) to 
 
 total services: __2__  
 total resources: __2__  
+source project: __[stackql-provider-typesafe](https://github.com/stackql-registry/stackql-provider-typesafe)__  
 
 :::
 
