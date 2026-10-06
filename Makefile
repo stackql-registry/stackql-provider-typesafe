@@ -29,6 +29,7 @@ VERSION := v00.00.00000
 OPENAPI_DIR := provider-dev/openapi
 SERVICES_DIR := $(OPENAPI_DIR)/src/$(PROVIDER)
 PROVIDER_DIR := $(SERVICES_DIR)/$(VERSION)
+SOURCE_PROJECT ?= https://github.com/stackql-registry/stackql-provider-$(PROVIDER)
 SOURCE_DIR := provider-dev/source
 CONFIG_DIR := provider-dev/config
 GRAPHQL_DIR := provider-dev/source-graphql
@@ -153,13 +154,17 @@ smoke-read-only: venv ## live catalog read only - no evaluation is billed
 
 # -------------------------------------------------------------------- docs
 
-docs: ## generate the website docs (snake_case surface), then sanitize for MDX
+# --source-project (provider-utils >= 0.7.11) adds a "source project" row to the
+# Provider Summary admonition on the landing page, linking the repository name
+# to SOURCE_PROJECT (override it on the command line for a fork).
+docs: ## generate the website docs (snake_case surface, source project link), then sanitize for MDX
 	npm run generate-docs -- \
 	  --provider-name $(PROVIDER) \
 	  --provider-dir ./$(PROVIDER_DIR) \
 	  --output-dir ./website \
 	  --provider-data-dir ./provider-dev/docgen/provider-data \
-	  --snake-case-aliases
+	  --snake-case-aliases \
+	  --source-project $(SOURCE_PROJECT)
 	npm run sanitize-docs
 
 website: ## build the docusaurus microsite (vendors the shared stackql config first)

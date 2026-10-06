@@ -4,7 +4,7 @@
 // hook so a fresh `npm install` / `npm ci` is always patched before
 // `make docs`.
 //
-// Upstream gap (provider-utils 0.7.10, the same in 0.7.7 and 0.7.9): docgen
+// Upstream gap (provider-utils 0.7.11, the same in 0.7.7, 0.7.9 and 0.7.10): docgen
 // builds a method's "Required Params" from `parameters` plus
 // requestBody.required, but ONLY for insert / update / replace / exec access
 // types (src/docgen/resource/methods.js getRequiredBodyParams), and the
